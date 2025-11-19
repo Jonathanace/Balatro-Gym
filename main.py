@@ -626,8 +626,10 @@ class BalatroEnv(gym.Env):
         return observation, info
 
     def step(self, action):
-        info = self._get_info()
+        action_name = balatrobot.enums.actions()
 
+
+gym.register(id="Balatro-v0", entry_point="main:BalatroEnv", max_episode_steps=10)
 
 def test_env():
     env = BalatroEnv()
@@ -640,7 +642,7 @@ def test_env():
     # print(obs)
 
 
-def test_client():
+def save_data():
     with BalatroClient() as client:
         try:
             game_state = client.send_message("get_game_state", {})
@@ -656,5 +658,17 @@ def test_client():
             logger.error(f"Unexpected error: {e}")
 
 
+def test_environment():
+    env = BalatroEnv()
+    try:
+        obs, info = env.reset()
+    finally:
+        env.client.disconnect()
+
+    # print(obs)
+
+
 if __name__ == "__main__":
-    test_client()
+    # save_data()
+
+    test_environment()
