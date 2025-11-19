@@ -288,6 +288,7 @@ def _process_card_features(card):
 
 
 class BalatroEnv(gym.Env):
+    ACTIONS = _build_map(balatrobot.enums.Actions, start_index=0)
     JOKERS = [joker.name for joker in balatrobot.enums.Jokers]
     JOKER_MAP = _build_map(JOKERS)
 
@@ -321,7 +322,10 @@ class BalatroEnv(gym.Env):
 
         # Order taken from balatrobot.src.balatrobot.enums.py.Actions
         self.action_space = Dict(
-            {"action_type": Discrete(len(self.ACTIONS))} + GAME_ACTION_NAMES
+            {
+                "action_type": Discrete(len(self.ACTIONS)),
+                "action args": Dict(GAME_ACTION_SPACE),
+            }
         )
 
         self.observation_space = Dict(
