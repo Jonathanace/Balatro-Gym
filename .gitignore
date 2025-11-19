@@ -208,3 +208,5 @@ __marimo__/
 
 # Other
 uv.lock
+output/**
+Balatro-Gym.code-workspace

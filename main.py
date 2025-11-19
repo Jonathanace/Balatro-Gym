@@ -6,6 +6,7 @@ import numpy as np
 import gymnasium as gym
 import contextlib
 from enum import Enum, auto, EnumMeta
+import pathlib
 from gymnasium.spaces import (
     OneOf,
     Dict,
@@ -211,23 +212,23 @@ TAROT_CARDS = [
 
 # CONSUMABLES = PLANET_CARDS + TAROT_CARDS
 
-RANKS = [
-    "Ace",
-    "Two",
-    "Three",
-    "Four",
-    "Five",
-    "Six",
-    "Seven",
-    "Eight",
-    "Nine",
-    "Ten",
+CARD_RANKS = [
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
     "Jack",
     "Queen",
     "King",
+    "Ace",
 ]
 
-SUITS = ["Hearts", "Diamonds", "Clubs", "Spades"]
+CARD_SUITS = ["Hearts", "Diamonds", "Clubs", "Spades"]
 
 N_CONSUMABLES = len(balatrobot.enums.Consumables)
 N_STAKES = len(balatrobot.enums.Stakes)
@@ -236,8 +237,8 @@ N_STAKES = len(balatrobot.enums.Stakes)
 CARD_MODIFIERS = ["Enancement", "Edition", "Seal"]
 
 CARD_FEATURE_COUNTS = [
-    len(RANKS),
-    len(SUITS),
+    len(CARD_RANKS),
+    len(CARD_SUITS),
     len(balatrobot.enums.Enhancements),
     len(balatrobot.enums.Editions),
     len(balatrobot.enums.Seals),
@@ -248,7 +249,7 @@ HAND_NVEC = np.tile(CARD_FEATURE_COUNTS, (MAX_HELD_HAND_SIZE, 1))
 HIGHLIGHTED_CARDS_NVEC = np.tile(CARD_FEATURE_COUNTS, (MAX_PLAY_HAND_SIZE, 1))
 
 
-def _build_map(items) -> dict:
+def _build_map(items: list[str], start_index: int = 1) -> dict:
     if isinstance(items, list):
         item_names = items
     elif isinstance(items, EnumMeta):
@@ -256,9 +257,34 @@ def _build_map(items) -> dict:
     else:
         raise ValueError("items must be a list or an EnumMeta")
 
-    name_map = {name: i for i, name in enumerate(item_names, start=1)}
+    name_map = {name: i for i, name in enumerate(item_names, start=start_index)}
 
     return name_map
+
+
+def _process_card_features(card):
+    card_rank = card["base"]["id"]
+    card_rank_id = card_rank - 2
+
+    card_suit = card["base"]["suit"]
+    card_suit_id = BalatroEnv.CARD_SUITS[card_suit]
+
+    card_enhancement = card["ability"]["name"].split(" ")[0]
+    card_enhancement_id = BalatroEnv.ENHANCEMENTS[card_enhancement]
+
+    card_edition = card["edition"]["key"]  # this is unverified
+    card_edition_id = BalatroEnv.EDITIONS[card_edition]
+
+    card_seal = card["seal"]
+    card_seal_id = BalatroEnv.SEALS[card_seal]
+
+    return [
+        card_rank_id,
+        card_suit_id,
+        card_enhancement_id,
+        card_edition_id,
+        card_seal_id,
+    ]
 
 
 class BalatroEnv(gym.Env):
@@ -275,6 +301,17 @@ class BalatroEnv(gym.Env):
 
     DECKS = [deck.value for deck in balatrobot.enums.Decks]
     DECKS_MAP = _build_map(DECKS)
+
+    CARD_SUITS = _build_map(CARD_SUITS, start_index=0)
+    CARD_MODIFIERS = _build_map(CARD_MODIFIERS)
+
+    ENHANCEMENTS = _build_map(balatrobot.enums.Enhancements, start_index=0)
+    EDITIONS = _build_map(balatrobot.enums.Editions, start_index=0)
+    SEALS = _build_map(balatrobot.enums.Seals, start_index=0)
+
+    VOUCHERS = _build_map(balatrobot.enums.Vouchers, start_index=1)
+
+    BLIND_STATUSES = _build_map(BLIND_STATUSES, start_index=0)
 
     def __init__(self, deck: str = "Red Deck", stake: int = 1):
         self.deck = deck
@@ -343,6 +380,18 @@ class BalatroEnv(gym.Env):
                         "log_chips": Box(low=0, high=100, shape=(1,), dtype=np.float32),
                         "rounds": Box(low=1, high=100, shape=(1,), dtype=np.int32),
                         "deck": Discrete(N_DECKS),
+                        "stake": Box(low=1, high=N_STAKES, shape=(1,), dtype=np.int32),
+                        "win_ante": Box(low=0, high=100, shape=(1,), dtype=np.int32),
+                        "interest_cap": Box(
+                            low=0, high=100, shape=(1,), dtype=np.int32
+                        ),
+                        "skips": Box(low=0, high=100, shape=(1,), dtype=np.int32),
+                        "base_reroll_cap": Box(
+                            low=0, high=100, shape=(1,), dtype=np.int32
+                        ),
+                        "interest_amount": Box(
+                            low=0, high=100, shape=(1,), dtype=np.int32
+                        ),
                     }
                 ),
                 # TODO: ADD HAND LEVELS
@@ -350,10 +399,6 @@ class BalatroEnv(gym.Env):
                 "highlighted_cards": MultiDiscrete(
                     nvec=HIGHLIGHTED_CARDS_NVEC, dtype=np.int32
                 ),
-                "stake": Box(low=1, high=N_STAKES, shape=(1,), dtype=np.int32),
-                "win_ante": Box(low=0, high=100, shape=(1,), dtype=np.int32),
-                "interest_cap": Box(low=0, high=100, shape=(1,), dtype=np.int32),
-                "skips": Box(low=0, high=100, shape=(1,), dtype=np.int32),
                 "base_reroll_cost": Box(low=0, high=100, shape=(1,), dtype=np.int32),
                 "interest_amount": Box(low=0, high=100, shape=(1,), dtype=np.int32),
                 "round": Box(low=1, high=100, shape=(1,), dtype=np.int32),
@@ -375,6 +420,7 @@ class BalatroEnv(gym.Env):
                                 "log_score": Box(
                                     low=0, high=100, shape=(1,), dtype=np.float32
                                 ),
+                                "status": Discrete(len(BLIND_STATUSES)),
                             }
                         ),
                         "large": Dict(
@@ -383,6 +429,7 @@ class BalatroEnv(gym.Env):
                                 "log_score": Box(
                                     low=0, high=100, shape=(1,), dtype=np.float32
                                 ),
+                                "status": Discrete(len(BLIND_STATUSES)),
                             }
                         ),
                     }
@@ -502,7 +549,6 @@ class BalatroEnv(gym.Env):
         obs_game["log_chips"] = np.log(chips + 1).astype(np.float32)
         observation["game"] = obs_game
         obs_game["deck"] = self.DECKS_MAP(game_obs["game"]["selected_back"]["name"])
-        observation["game"] = obs_game
 
         # hand_cards
         obs_hand_cards = np.zeros(
@@ -510,8 +556,60 @@ class BalatroEnv(gym.Env):
         )
 
         for i, card in enumerate(hand["cards"]):
-            # card_rank =
-            pass
+            features = _process_card_features(card)
+            obs_hand_cards[i] = features
+
+        # highlighted_cards
+        highlighted_cards = [card for card in hand["cards"] if card["highlighted"]]
+        highlighted_cards_obs = np.zeros(CARD_FEATURE_COUNTS, (MAX_PLAY_HAND_SIZE, 1))
+        for card in highlighted_cards:
+            features = _process_card_features(card)
+            highlighted_cards_obs[i] = features
+
+        # stake
+        observation["stake"] = game["stake"]
+
+        # win_ante
+        observation["win ante"] = game["win_ante"]
+
+        # interest_cap
+        observation["interest_cap"] = game["interest_cap"]
+
+        # skips
+        observation["skips"] = game["skips"]
+
+        # base_reroll_cost
+        observation["base_reroll_cost"] = game["base_reroll_cost"]
+
+        # interest_amount
+        observation["interest_amount"] = game["interest_amount"]
+
+        # round
+        observation["round"] = game["round"]
+
+        # shop_vouchers
+
+        voucher_name = game_obs["shop_vouchers"]["cards"][0]["config"]["center_key"]
+        voucher_id = self.VOUCHERS[voucher_name]
+        observation["shop_vouchers"] = voucher_id
+
+        # blinds
+        blinds = game_obs["blinds"]
+        obs_blind = {}
+        for blind_type in ["boss", "small", "large"]:
+            blind_features = {}
+            blind = blinds[blind_type]
+            blind_features["status"] = self.BLIND_STATUSES[blind["status"]]
+            blind_features["log_score"] = np.log(blind["score"] + 1).astype(np.float32)
+
+            if blind_type == "boss":
+                blind_features["name"] = blind["config"]["name"]
+            else:
+                blind_features["tag_name"] = blind["config"]["tag_name"]
+
+            obs_blind[blind_type] = blind_features
+
+        observation["blinds"] = obs_blind
 
         return observation
 
@@ -548,7 +646,10 @@ def test_client():
             game_state = client.send_message("get_game_state", {})
             print(game_state)
 
-            with open("shop_response.json", "w") as f:
+            output_files = pathlib.Path(".").glob("output/response*.json")
+            num_existing_outputs = len(list(output_files))
+            output_json = f"output/response_{num_existing_outputs}.json"
+            with open(output_json, "w") as f:
                 json.dump(game_state, f, indent=4)
 
         except Exception as e:
