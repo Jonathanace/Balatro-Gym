@@ -350,7 +350,7 @@ class BalatroEnv(gym.Env):
                 "shop_jokers": Box(
                     low=0, high=N_JOKERS, shape=(MAX_SHOP_JOKERS,), dtype=np.int32
                 ),
-                "state": Discrete(len(balatrobot.enums.GameStates)),
+                "state": Discrete(len(balatrobot.enums.State)),
                 "game": Dict(
                     {
                         "current_round": Dict(
