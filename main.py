@@ -18,6 +18,7 @@ from gymnasium.spaces import (
 )
 import balatrobot.enums
 import json
+from contextlib import nullcontext
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -123,7 +124,7 @@ BOSS_BLINDS = [
     "Cerulean Bell",
 ]
 N_BOSS_BLINDS = len(BOSS_BLINDS)
-BLIND_STATUSES = ["Current", "Upcoming", "Defeated"]
+BLIND_STATUSES = ["Current", "Upcoming", "Defeated", "Select"]
 
 N_JOKERS = len(balatrobot.enums.Jokers)
 N_VOUCHERS = len(balatrobot.enums.Vouchers)
@@ -460,7 +461,7 @@ class BalatroEnv(gym.Env):
                 logger.error(f"Error code: {e.error_code}")
                 raise
             except Exception as e:
-                logger.error(f"Unexpected error: {e}")
+                logger.error(f"Unexpected balatro function error: {e}")
                 raise
         return wrapper
 
@@ -481,15 +482,14 @@ class BalatroEnv(gym.Env):
     @balatro_function
     def _get_obs(self):
         game_obs = self.client.send_message("get_game_state", {})
+        current_state = balatrobot.enums.State(game_obs["state"])
+        logging.info(f"Current game state: {current_state.name}")
         joker_names = [
             joker["config"]["center_key"] for joker in game_obs["jokers"]["cards"]
         ]
-        hand = game_obs["hand"]
-        shop_booster = game_obs["shop_booster"]
         state = game_obs["state"]
         game = game_obs["game"]
-        shop_vouchers = game_obs["shop_vouchers"]
-        blinds = game["blinds"]
+        blinds = game_obs["blinds"]
 
         observation = {}
 
@@ -513,9 +513,11 @@ class BalatroEnv(gym.Env):
 
         # shop_booster
         obs_shop_booster = np.zeros(2, dtype=np.int32)
-        for i, booster in enumerate(shop_booster["cards"]):
-            booster_name = booster["label"]
-            obs_shop_booster[i] = PacksEnum[booster_name].value
+        if current_state == "SHOP":
+            shop_booster = game_obs["shop_booster"]
+            for i, booster in enumerate(shop_booster["cards"]):
+                booster_name = booster["label"]
+                obs_shop_booster[i] = PacksEnum[booster_name].value
         observation["shop_booster"] = obs_shop_booster
 
         # consumables
@@ -526,9 +528,10 @@ class BalatroEnv(gym.Env):
 
         # shop_jokers
         obs_shop_jokers = np.zeros(MAX_SHOP_JOKERS, dtype=np.int32)
-        for i, card in enumerate(game_obs["shop_jokers"]["cards"]):
-            card_name = card["config"]["center_key"]
-            obs_shop_jokers[i] = self.JOKERS_AND_CONSUMABLES_MAP[card_name].value
+        if current_state == "SHOP":
+            for i, card in enumerate(game_obs["shop_jokers"]["cards"]):
+                card_name = card["config"]["center_key"]
+                obs_shop_jokers[i] = self.JOKERS_AND_CONSUMABLES_MAP[card_name].value
         observation["shop_jokers"] = obs_shop_jokers
 
         # state
@@ -546,29 +549,34 @@ class BalatroEnv(gym.Env):
         ]
         obs_current_round = {key: current_round[key] for key in current_round_keys}
         game = game_obs["game"]
-        game_keys = ["hands_played", "log_chips", "rounds", "decks", "dollars"]
+        game_keys = ["hands_played", "round", "dollars"]
         obs_game = {key: game[key] for key in game_keys}
         obs_game["current_round"] = obs_current_round
         chips = game_obs["game"]["chips"]
         obs_game["log_chips"] = np.log(chips + 1).astype(np.float32)
         observation["game"] = obs_game
-        obs_game["deck"] = self.DECKS_MAP(game_obs["game"]["selected_back"]["name"])
+        obs_game["deck"] = self.DECKS_MAP[game_obs["game"]["selected_back"]["name"]]
 
         # hand_cards
         obs_hand_cards = np.zeros(
             (MAX_HELD_HAND_SIZE, len(CARD_FEATURE_COUNTS)), dtype=np.int32
         )
+        if current_state == "SELECTING_HAND":
+            hand = game_obs["hand"]
+            for i, card in enumerate(hand["cards"]):
+                features = _process_card_features(card)
+                obs_hand_cards[i] = features
 
-        for i, card in enumerate(hand["cards"]):
-            features = _process_card_features(card)
-            obs_hand_cards[i] = features
-
-        # highlighted_cards
-        highlighted_cards = [card for card in hand["cards"] if card["highlighted"]]
-        highlighted_cards_obs = np.zeros(CARD_FEATURE_COUNTS, (MAX_PLAY_HAND_SIZE, 1))
-        for card in highlighted_cards:
-            features = _process_card_features(card)
-            highlighted_cards_obs[i] = features
+            # highlighted_cards
+            highlighted_cards_obs = np.zeros(
+                (MAX_PLAY_HAND_SIZE, len(CARD_FEATURE_COUNTS)), dtype=np.int32
+            )
+        if current_state == "SELECTING_HAND":
+            pass
+            highlighted_cards = [card for card in hand["cards"] if card["highlighted"]]
+            for card in highlighted_cards:
+                features = _process_card_features(card)
+                highlighted_cards_obs[i] = features
 
         # stake
         observation["stake"] = game["stake"]
@@ -592,24 +600,25 @@ class BalatroEnv(gym.Env):
         observation["round"] = game["round"]
 
         # shop_vouchers
-
-        voucher_name = game_obs["shop_vouchers"]["cards"][0]["config"]["center_key"]
-        voucher_id = self.VOUCHERS[voucher_name]
+        voucher_id = 0
+        if current_state == "SHOP":
+            voucher_name = game_obs["shop_vouchers"]["cards"][0]["config"]["center_key"]
+            voucher_id = self.VOUCHERS[voucher_name]
         observation["shop_vouchers"] = voucher_id
 
         # blinds
         blinds = game_obs["blinds"]
         obs_blind = {}
-        for blind_type in ["boss", "small", "large"]:
+        for blind_type in ["boss", "small", "big"]:
             blind_features = {}
             blind = blinds[blind_type]
             blind_features["status"] = self.BLIND_STATUSES[blind["status"]]
             blind_features["log_score"] = np.log(blind["score"] + 1).astype(np.float32)
 
             if blind_type == "boss":
-                blind_features["name"] = blind["config"]["name"]
+                blind_features["name"] = blind["name"]
             else:
-                blind_features["tag_name"] = blind["config"]["tag_name"]
+                blind_features["tag_name"] = blind["tag_name"]
 
             obs_blind[blind_type] = blind_features
 
@@ -646,26 +655,32 @@ def test_env():
     # print(obs)
 
 
-def save_data():
-    with BalatroClient() as client:
+def save_data(file_name: str = "response", client: Optional[BalatroClient] = None):
+    balatro_client = nullcontext(client) if client else BalatroClient()
+
+    with balatro_client as client:
         try:
             game_state = client.send_message("get_game_state", {})
-            print(game_state)
+            # print(game_state)
 
-            output_files = pathlib.Path(".").glob("output/response*.json")
+            output_files = pathlib.Path(".").glob(f"output/{file_name}*.json")
             num_existing_outputs = len(list(output_files))
-            output_json = f"output/response_{num_existing_outputs}.json"
+            output_json = f"output/{file_name}_{num_existing_outputs}.json"
             with open(output_json, "w") as f:
                 json.dump(game_state, f, indent=4)
+            logging.info(f"Saved game state to {output_json}")
 
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
+            logger.error(f"Unexpected save_data error: {e}")
 
 
 def test_environment():
     env = BalatroEnv()
     try:
         obs, info = env.reset()
+    except Exception as e:
+        save_data(file_name="test_fail_output", client=env.client)
+        raise e
     finally:
         env.client.disconnect()
 
