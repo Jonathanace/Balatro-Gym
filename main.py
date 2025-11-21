@@ -698,7 +698,15 @@ class BalatroEnv(gym.Env):
             self.client.send_message("use_consumable", {"index": args})
         else:
             logging.error(f"Unknown action {action_name} in state {state_name}.")
-        return self._get_obs(), 0, False, False, self._get_info()
+
+        reward = 0
+        terminated = False
+        if state_name == "GAME_OVER":
+            logging.info("GAME OVER REACHED!!!!!!!!!!")
+            reward = 1
+            terminated = True
+
+        return self._get_obs(), reward, terminated, False, self._get_info()
 
 
 def register_env():
