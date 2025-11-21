@@ -64,7 +64,7 @@ BOSS_BLINDS = [
     "Cerulean Bell",
 ]
 N_BOSS_BLINDS = len(BOSS_BLINDS)
-BLIND_STATUSES = ["Current", "Upcoming", "Defeated", "Select"]
+BLIND_STATUSES = ["Current", "Upcoming", "Defeated", "Select", "Skipped"]
 
 N_JOKERS = len(balatrobot.enums.Jokers)
 N_VOUCHERS = len(balatrobot.enums.Vouchers)
@@ -269,6 +269,7 @@ def _process_card_features(card):
 
 class BalatroEnv(gym.Env):
     ACTIONS = _build_map(GAME_ACTION_NAMES, start_index=0)
+    logging.info(f"ACTIONS: {ACTIONS}")
     JOKERS = [joker.name for joker in balatrobot.enums.Jokers]
     JOKER_MAP = _build_map(JOKERS)
 
@@ -662,14 +663,14 @@ class BalatroEnv(gym.Env):
 
         print(f"Taking action: {action_name} with args: {action_args}")
 
-        if action_name == "SKIP_OR_SELECT_BLIND":
-            skip_or_select = action_args["SKIP_OR_SELECT_BLIND"]
+        if action_name == "skip_or_select_blind":
+            skip_or_select = action_args["skip_or_select_blind"]
             action_arg = "skip" if skip_or_select == 0 else "select"
             self.client.send_message("skip_or_select_blind", {"action": action_arg})
-        elif action_name == "PLAY_HAND_OR_DISCARD":
-            play_or_discard = action_args["PLAY_HAND_OR_DISCARD"]["action"]
+        elif action_name == "play_hand_or_discard":
+            play_or_discard = action_args["play_hand_or_discard"]["action"]
             action_arg = "play_hand" if play_or_discard == 0 else "discard"
-            card_mask = action_args["PLAY_HAND_OR_DISCARD"]["cards"]
+            card_mask = action_args["play_hand_or_discard"]["cards"]
             selected_cards = [
                 i for i, selected in enumerate(card_mask) if selected == 1
             ]
@@ -680,21 +681,21 @@ class BalatroEnv(gym.Env):
                     "cards": selected_cards,
                 },
             )
-        elif action_name == "SHOP_NEXT_ROUND":
+        elif action_name == "shop_next_round":
             self.client.send_message("next_round", {})
-        elif action_name == "SHOP_BUY_CARD":
+        elif action_name == "shop_buy_card":
             self.client.send_message("buy_card", {"index": args})
-        elif action_name == "SHOP_BUY_AND_USE_CARD":
+        elif action_name == "shop_buy_and_use_card":
             self.client.send_message("buy_and_use_card", {"index": args})
-        elif action_name == "SHOP_REROLL":
+        elif action_name == "shop_reroll":
             self.client.send_message("reroll", {})
-        elif action_name == "SHOP_REDEEM_VOUCHER":
+        elif action_name == "shop_redeem_voucher":
             self.client.send_message("redeem_voucher", {"index": args})
-        elif action_name == "SELL_JOKER":
+        elif action_name == "sell_joker":
             self.client.send_message("sell_joker", {"index": args})
-        elif action_name == "SELL_CONSUMABLE":
+        elif action_name == "sell_consumable":
             self.client.send_message("sell_consumable", {"index": args})
-        elif action_name == "USE_CONSUMABLE":
+        elif action_name == "use_consumable":
             self.client.send_message("use_consumable", {"index": args})
         else:
             logging.error(f"Unknown action {action_name} in state {state_name}.")
