@@ -71,8 +71,8 @@ N_VOUCHERS = len(balatrobot.enums.Vouchers)
 N_DECKS = len(balatrobot.enums.Decks)
 
 GAME_ACTION_SPACE = {
-    "SKIP_OR_SELECT_BLIND": Discrete(2),
-    "PLAY_HAND_OR_DISCARD": Dict(
+    "skip_or_select_blind": Discrete(2),
+    "play_hand_or_discard": Dict(
         {
             "action": Discrete(2),  # 0: Play Hand, 1: Discard
             "cards": MultiBinary(
@@ -80,13 +80,13 @@ GAME_ACTION_SPACE = {
             ),  # Binary mask for cards to play or
         }
     ),
-    "SHOP_NEXT_ROUND": Discrete(1),
-    "SHOP_BUY_CARD": Discrete(MAX_SHOP_JOKERS),
-    "SHOP_BUY_AND_USE_CARD": Discrete(MAX_SHOP_JOKERS),
-    "SHOP_REROLL": Discrete(1),
-    "SHOP_REDEEM_VOUCHER": Discrete(1),
-    "SELL_JOKER": Discrete(UNBOUNDED_MAX),
-    "SELL_CONSUMABLE": Discrete(UNBOUNDED_MAX),
+    "shop_next_round": Discrete(1),
+    "shop_buy_card": Discrete(4),
+    "shop_buy_and_use_card": Discrete(MAX_SHOP_JOKERS),
+    "shop_reroll": Discrete(1),
+    "shop_redeem_voucher": Discrete(1),
+    "sell_joker": Discrete(UNBOUNDED_MAX),
+    "sell_consumable": Discrete(UNBOUNDED_MAX),
 }
 
 GAME_ACTION_NAMES = list(GAME_ACTION_SPACE.keys())
@@ -217,6 +217,18 @@ HAND_NVEC = np.tile(CARD_FEATURE_COUNTS, (MAX_HELD_HAND_SIZE, 1))
 HIGHLIGHTED_CARDS_NVEC = np.tile(CARD_FEATURE_COUNTS, (MAX_PLAY_HAND_SIZE, 1))
 
 
+class ReverseMap(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # We calculate the inverse once upon creation
+        # Note: This assumes the map is static (won't change after build_map returns)
+        self._inverse = {v: k for k, v in self.items()}
+
+    @property
+    def inverse(self):
+        return self._inverse
+
+
 def _build_map(items: list[str], start_index: int = 1) -> dict:
     if isinstance(items, list):
         item_names = items
@@ -227,7 +239,7 @@ def _build_map(items: list[str], start_index: int = 1) -> dict:
 
     name_map = {name: i for i, name in enumerate(item_names, start=start_index)}
 
-    return name_map
+    return ReverseMap(name_map)
 
 
 def _process_card_features(card):
@@ -256,7 +268,7 @@ def _process_card_features(card):
 
 
 class BalatroEnv(gym.Env):
-    ACTIONS = _build_map(balatrobot.enums.Actions, start_index=0)
+    ACTIONS = _build_map(GAME_ACTION_NAMES, start_index=0)
     JOKERS = [joker.name for joker in balatrobot.enums.Jokers]
     JOKER_MAP = _build_map(JOKERS)
 
@@ -284,6 +296,32 @@ class BalatroEnv(gym.Env):
     BOSS_BLINDS_MAP = _build_map(BOSS_BLINDS, start_index=0)
 
     TAGS_MAP = _build_map(TAGS)
+
+    STATE_ACTIONS = {
+        "MENU": ["start_run"],
+        "BLIND_SELECT": [
+            "skip_or_select_blind",
+            "sell_joker",
+            "sell_consumable",
+            "use_consumable",
+        ],
+        "SELECTING_HAND": [
+            "play_hand_or_discard",
+            "sell_joker",
+            "sell_consumable",
+            "use_consumable",
+        ],
+        "ROUND_EVAL": ["cash_out", "sell_joker", "sell_consumable", "use_consumable"],
+        "SHOP": [
+            "shop_next_round",
+            "shop_buy_card",
+            "shop_buy_and_use_card",
+            "shop_reroll",
+            "shop_redeem_voucher",
+            "sell_joker",
+        ],
+        "GAME_OVER": ["go_to_menu"],
+    }
 
     def __init__(self, deck: str = "Red Deck", stake: int = 1):
         self.deck = deck
@@ -415,7 +453,8 @@ class BalatroEnv(gym.Env):
             self.client = None
 
     def __del__(self):
-        self.client.disconnect()
+        if getattr(self, "client", None):
+            self.client.disconnect()
 
     ### Helper functions
     @staticmethod
@@ -558,7 +597,7 @@ class BalatroEnv(gym.Env):
         if current_state == "SELECTING_HAND":
             pass
             highlighted_cards = [card for card in hand["cards"] if card["highlighted"]]
-            for card in highlighted_cards:
+            for i, card in enumerate(highlighted_cards):
                 features = _process_card_features(card)
                 highlighted_cards_obs[i] = features
         observation["highlighted_cards"] = highlighted_cards_obs
@@ -577,9 +616,9 @@ class BalatroEnv(gym.Env):
             blind_features = {}
             blind = blinds[blind_type]
             blind_features["status"] = self.BLIND_STATUSES[blind["status"]]
-            blind_features["log_score"] = [
-                np.log(blind["score"] + 1).astype(np.float32)
-            ]
+            blind_features["log_score"] = np.array(
+                [np.log(blind["score"] + 1)], dtype=np.float32
+            )
 
             if blind_type == "boss":
                 blind_features["name"] = self.BOSS_BLINDS_MAP[blind["name"]]
@@ -607,8 +646,59 @@ class BalatroEnv(gym.Env):
     def step(self, action):
         action_id = action["action_type"]
         action_args = action["action args"]
-        action_name = balatrobot.enums.Actions(action_id)
-        print(f"Taking action: {action_name.name} with args: {action_args}")
+        action_name = self.ACTIONS.inverse[int(action_id)]
+        args = action_args[action_name]
+
+        observation = self._get_obs()
+        state_id = observation["state"]
+        state_name = self.STATES(state_id).name
+
+        if action_name not in self.STATE_ACTIONS[state_name]:
+            logging.error(f"Action {action_name} not valid in state {state_name}!")
+            return observation, -1, False, False, self._get_info()
+        else:
+            logging.info(f"Executing action: {action_name} from state {state_name}.")
+            # Invalid action for current state TODO: Early stop here
+
+        print(f"Taking action: {action_name} with args: {action_args}")
+
+        if action_name == "SKIP_OR_SELECT_BLIND":
+            skip_or_select = action_args["SKIP_OR_SELECT_BLIND"]
+            action_arg = "skip" if skip_or_select == 0 else "select"
+            self.client.send_message("skip_or_select_blind", {"action": action_arg})
+        elif action_name == "PLAY_HAND_OR_DISCARD":
+            play_or_discard = action_args["PLAY_HAND_OR_DISCARD"]["action"]
+            action_arg = "play_hand" if play_or_discard == 0 else "discard"
+            card_mask = action_args["PLAY_HAND_OR_DISCARD"]["cards"]
+            selected_cards = [
+                i for i, selected in enumerate(card_mask) if selected == 1
+            ]
+            self.client.send_message(
+                "play_hand_or_discard",
+                {
+                    "action": action_arg,
+                    "cards": selected_cards,
+                },
+            )
+        elif action_name == "SHOP_NEXT_ROUND":
+            self.client.send_message("next_round", {})
+        elif action_name == "SHOP_BUY_CARD":
+            self.client.send_message("buy_card", {"index": args})
+        elif action_name == "SHOP_BUY_AND_USE_CARD":
+            self.client.send_message("buy_and_use_card", {"index": args})
+        elif action_name == "SHOP_REROLL":
+            self.client.send_message("reroll", {})
+        elif action_name == "SHOP_REDEEM_VOUCHER":
+            self.client.send_message("redeem_voucher", {"index": args})
+        elif action_name == "SELL_JOKER":
+            self.client.send_message("sell_joker", {"index": args})
+        elif action_name == "SELL_CONSUMABLE":
+            self.client.send_message("sell_consumable", {"index": args})
+        elif action_name == "USE_CONSUMABLE":
+            self.client.send_message("use_consumable", {"index": args})
+        else:
+            logging.error(f"Unknown action {action_name} in state {state_name}.")
+        return self._get_obs(), 0, False, False, self._get_info()
 
 
 def register_env():
@@ -623,7 +713,7 @@ def test_env():
         obs, info = env.reset()
         obs = env._get_obs()
     finally:
-        env.client.disconnect()
+        env.close()
 
     # print(obs)
 
@@ -684,8 +774,8 @@ def test_environment():
     except Exception as e:
         raise e
     finally:
-        save_data(file_name="test_fail_output", client=env.client)
-        env.client.disconnect()
+        save_data(file_name="test_fail_output", client=env.unwrapped.client)
+        env.close()
 
     # print(obs)
 
