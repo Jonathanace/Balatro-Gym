@@ -16,6 +16,7 @@ from gymnasium.spaces import (
     Box,
     MultiDiscrete,
 )
+from gymnasium.utils.env_checker import check_env
 import balatrobot.enums
 import json
 from contextlib import nullcontext
@@ -27,67 +28,6 @@ logging.basicConfig(level=logging.INFO)
 def _create_numbered_enum(class_name, action_keys):
     members = [(key.upper(), i) for i, key in enumerate(action_keys)]
     return Enum(class_name, members)
-
-
-# Actions = _create_numbered_emum(
-#     [
-#         "GET_GAME_STATE",
-#         "GO_TO_MENU",
-#         "START_RUN",
-#         "SKIP_OR_SELECT_BLIND",
-#         "PLAY_HAND_OR_DISCARD",
-#         "REARRANGE_HAND",
-#         "REARRANGE_CONSUMABLES",
-#         "CASH_OUT",
-#         "SHOP",
-#         "NEXT_ROUND",
-#         "BUY_CARD",
-#         "BUY_AND_USE_CARD",
-#         "REROLL",
-#         "SELL_JOKER",
-#         "SELL_CONSUMABLE",
-#         "USE_CONSUMABLE",
-#     ]
-# )
-
-# Decks = _create_numbered_emum(["RED_DECK", "BLUE_DECK", "YELLOW_DECK"])
-
-
-# class Decks(Enum):
-#     RED_DECK = 0
-#     BLUE_DECK = 1
-
-
-"""
-# Define two disjoint action spaces: one for when in the shop, another for when playing a blind
-shop_action_space = Tuple([
-    # Subspace 1
-    Box(low=0.0, high=10.0),
-    # Subspace 2
-    Discrete(3)
-])
-
-blind_action_space = Tuple([
-    # Subspace 3
-    Box(low=-5.0, high=5.0),
-    # Subspace 4
-    Discrete(6)
-])
-
-# Use OneOf to define the overall action space
-overall_action_space = OneOf([shop_action_space, blind_action_space])
-
-"""
-
-
-# class Actions(Enum):
-#     # Source: https://coder.github.io/balatrobot/protocol-api/#game-states
-#     SKIP_OR_SELECT_BLIND = 1
-#     PLAY_HAND_OR_DISCARD = 2
-#     SHOP_NEXT_ROUND = 3
-#     SELL_JOKER = 4
-#     SELL_CONSUMABLE = 5
-#     USE_CONSUMABLE = 6
 
 MAX_HELD_HAND_SIZE = 20
 MAX_SHOP_JOKERS = 4
@@ -140,11 +80,11 @@ GAME_ACTION_SPACE = {
             ),  # Binary mask for cards to play or
         }
     ),
-    "SHOP_NEXT_ROUND": Dict({}),
+    "SHOP_NEXT_ROUND": Discrete(1),
     "SHOP_BUY_CARD": Discrete(MAX_SHOP_JOKERS),
     "SHOP_BUY_AND_USE_CARD": Discrete(MAX_SHOP_JOKERS),
-    "SHOP_REROLL": Dict({}),
-    "SHOP_REDEEM_VOUCHER": Dict(),
+    "SHOP_REROLL": Discrete(1),
+    "SHOP_REDEEM_VOUCHER": Discrete(1),
     "SELL_JOKER": Discrete(UNBOUNDED_MAX),
     "SELL_CONSUMABLE": Discrete(UNBOUNDED_MAX),
 }
@@ -227,6 +167,33 @@ CARD_RANKS = [
     "Queen",
     "King",
     "Ace",
+]
+
+TAGS = [
+    "Uncommon Tag",
+    "Rare Tag",
+    "Negative Tag",
+    "Foil Tag",
+    "Holographic Tag",
+    "Polychrome Tag",
+    "Investment Tag",
+    "Voucher Tag",
+    "Boss Tag",
+    "Standard Tag",
+    "Charm Tag",
+    "Meteor Tag",
+    "Buffoon Tag",
+    "Handy Tag",
+    "Garbage Tag",
+    "Ethereal Tag",
+    "Coupon Tag",
+    "Double Tag",
+    "Juggle Tag",
+    "D6 Tag",
+    "Top-up Tag",
+    "Speed Tag",
+    "Orbital Tag",
+    "Economy Tag",
 ]
 
 CARD_SUITS = ["Hearts", "Diamonds", "Clubs", "Spades"]
@@ -314,6 +281,9 @@ class BalatroEnv(gym.Env):
     VOUCHERS = _build_map(balatrobot.enums.Vouchers, start_index=1)
 
     BLIND_STATUSES = _build_map(BLIND_STATUSES, start_index=0)
+    BOSS_BLINDS_MAP = _build_map(BOSS_BLINDS, start_index=0)
+
+    TAGS_MAP = _build_map(TAGS)
 
     def __init__(self, deck: str = "Red Deck", stake: int = 1):
         self.deck = deck
@@ -374,16 +344,16 @@ class BalatroEnv(gym.Env):
                                 "discards_used": Box(
                                     low=0, high=100, shape=(1,), dtype=np.int32
                                 ),
-                                "dollars": Box(
-                                    low=-1_000, high=1_000, shape=(1,), dtype=np.int32
-                                ),
                             }
+                        ),
+                        "dollars": Box(
+                            low=-1_000, high=1_000, shape=(1,), dtype=np.int32
                         ),
                         "hands_played": Box(
                             low=0, high=1_000, shape=(1,), dtype=np.int32
                         ),
                         "log_chips": Box(low=0, high=100, shape=(1,), dtype=np.float32),
-                        "rounds": Box(low=1, high=100, shape=(1,), dtype=np.int32),
+                        "round": Box(low=0, high=100, shape=(1,), dtype=np.int32),
                         "deck": Discrete(N_DECKS),
                         "stake": Box(low=1, high=N_STAKES, shape=(1,), dtype=np.int32),
                         "win_ante": Box(low=0, high=100, shape=(1,), dtype=np.int32),
@@ -391,7 +361,7 @@ class BalatroEnv(gym.Env):
                             low=0, high=100, shape=(1,), dtype=np.int32
                         ),
                         "skips": Box(low=0, high=100, shape=(1,), dtype=np.int32),
-                        "base_reroll_cap": Box(
+                        "base_reroll_cost": Box(
                             low=0, high=100, shape=(1,), dtype=np.int32
                         ),
                         "interest_amount": Box(
@@ -404,9 +374,6 @@ class BalatroEnv(gym.Env):
                 "highlighted_cards": MultiDiscrete(
                     nvec=HIGHLIGHTED_CARDS_NVEC, dtype=np.int32
                 ),
-                "base_reroll_cost": Box(low=0, high=100, shape=(1,), dtype=np.int32),
-                "interest_amount": Box(low=0, high=100, shape=(1,), dtype=np.int32),
-                "round": Box(low=1, high=100, shape=(1,), dtype=np.int32),
                 "shop_vouchers": Discrete(N_VOUCHERS + 1),
                 "blinds": Dict(
                     {
@@ -428,7 +395,7 @@ class BalatroEnv(gym.Env):
                                 "status": Discrete(len(BLIND_STATUSES)),
                             }
                         ),
-                        "large": Dict(
+                        "big": Dict(
                             {
                                 "tag_name": Discrete(len(balatrobot.enums.Tags)),
                                 "log_score": Box(
@@ -463,6 +430,7 @@ class BalatroEnv(gym.Env):
             except Exception as e:
                 logger.error(f"Unexpected balatro function error: {e}")
                 raise
+
         return wrapper
 
     @balatro_function
@@ -495,12 +463,12 @@ class BalatroEnv(gym.Env):
 
         # jokers_count
         observation["jokers_count"] = np.array(
-            game_obs["jokers"]["config"]["card_count"], dtype=np.int32
+            [game_obs["jokers"]["config"]["card_count"]], dtype=np.int32
         )
 
         # jokers_limit
         observation["jokers_limit"] = np.array(
-            game_obs["jokers"]["config"]["card_limit"], dtype=np.int32
+            [game_obs["jokers"]["config"]["card_limit"]], dtype=np.int32
         )
 
         # jokers
@@ -525,6 +493,7 @@ class BalatroEnv(gym.Env):
         for i, consumable in enumerate(game_obs["consumables"]["cards"]):
             consumable_name = consumable["config"]["center_key"]
             obs_consumables[i] = self.CONSUMABLES_MAP[consumable_name].value
+        observation["consumables"] = obs_consumables
 
         # shop_jokers
         obs_shop_jokers = np.zeros(MAX_SHOP_JOKERS, dtype=np.int32)
@@ -547,15 +516,29 @@ class BalatroEnv(gym.Env):
             "hands_played",
             "discards_used",
         ]
-        obs_current_round = {key: current_round[key] for key in current_round_keys}
+        obs_current_round = {
+            key: np.array([current_round[key]], dtype=np.int32)
+            for key in current_round_keys
+        }
         game = game_obs["game"]
-        game_keys = ["hands_played", "round", "dollars"]
-        obs_game = {key: game[key] for key in game_keys}
+        game_keys = [
+            "hands_played",
+            "round",
+            "dollars",
+            "stake",
+            "win_ante",
+            "interest_cap",
+            "skips",
+            "base_reroll_cost",
+            "interest_amount",
+        ]
+        obs_game = {key: np.array([game[key]], dtype=np.int32) for key in game_keys}
         obs_game["current_round"] = obs_current_round
         chips = game_obs["game"]["chips"]
-        obs_game["log_chips"] = np.log(chips + 1).astype(np.float32)
-        observation["game"] = obs_game
+        obs_game["log_chips"] = np.array([np.log(chips + 1)], dtype=np.float32)
         obs_game["deck"] = self.DECKS_MAP[game_obs["game"]["selected_back"]["name"]]
+
+        observation["game"] = obs_game
 
         # hand_cards
         obs_hand_cards = np.zeros(
@@ -566,38 +549,19 @@ class BalatroEnv(gym.Env):
             for i, card in enumerate(hand["cards"]):
                 features = _process_card_features(card)
                 obs_hand_cards[i] = features
+        observation["hand_cards"] = obs_hand_cards
 
-            # highlighted_cards
-            highlighted_cards_obs = np.zeros(
-                (MAX_PLAY_HAND_SIZE, len(CARD_FEATURE_COUNTS)), dtype=np.int32
-            )
+        # highlighted_cards
+        highlighted_cards_obs = np.zeros(
+            (MAX_PLAY_HAND_SIZE, len(CARD_FEATURE_COUNTS)), dtype=np.int32
+        )
         if current_state == "SELECTING_HAND":
             pass
             highlighted_cards = [card for card in hand["cards"] if card["highlighted"]]
             for card in highlighted_cards:
                 features = _process_card_features(card)
                 highlighted_cards_obs[i] = features
-
-        # stake
-        observation["stake"] = game["stake"]
-
-        # win_ante
-        observation["win ante"] = game["win_ante"]
-
-        # interest_cap
-        observation["interest_cap"] = game["interest_cap"]
-
-        # skips
-        observation["skips"] = game["skips"]
-
-        # base_reroll_cost
-        observation["base_reroll_cost"] = game["base_reroll_cost"]
-
-        # interest_amount
-        observation["interest_amount"] = game["interest_amount"]
-
-        # round
-        observation["round"] = game["round"]
+        observation["highlighted_cards"] = highlighted_cards_obs
 
         # shop_vouchers
         voucher_id = 0
@@ -613,12 +577,14 @@ class BalatroEnv(gym.Env):
             blind_features = {}
             blind = blinds[blind_type]
             blind_features["status"] = self.BLIND_STATUSES[blind["status"]]
-            blind_features["log_score"] = np.log(blind["score"] + 1).astype(np.float32)
+            blind_features["log_score"] = [
+                np.log(blind["score"] + 1).astype(np.float32)
+            ]
 
             if blind_type == "boss":
-                blind_features["name"] = blind["name"]
+                blind_features["name"] = self.BOSS_BLINDS_MAP[blind["name"]]
             else:
-                blind_features["tag_name"] = blind["tag_name"]
+                blind_features["tag_name"] = self.TAGS_MAP[blind["tag_name"]]
 
             obs_blind[blind_type] = blind_features
 
@@ -639,7 +605,14 @@ class BalatroEnv(gym.Env):
         return observation, info
 
     def step(self, action):
-        action_name = balatrobot.enums.actions()
+        action_id = action["action_type"]
+        action_args = action["action args"]
+        action_name = balatrobot.enums.Actions(action_id)
+        print(f"Taking action: {action_name.name} with args: {action_args}")
+
+
+def register_env():
+    gym.register(id="Balatro-v0", entry_point="main:BalatroEnv", max_episode_steps=10)
 
 
 gym.register(id="Balatro-v0", entry_point="main:BalatroEnv", max_episode_steps=10)
@@ -674,14 +647,44 @@ def save_data(file_name: str = "response", client: Optional[BalatroClient] = Non
             logger.error(f"Unexpected save_data error: {e}")
 
 
+def _output_key_diff(env, obs):
+    for key, space in env.observation_space.items():
+        if key not in obs:
+            print(f"❌ MISSING KEY: {key}")
+            continue
+
+        val = obs[key]
+
+        # check if this specific item is valid
+        is_valid = space.contains(val)
+
+        if not is_valid:
+            print(f"❌ INVALID: {key}")
+            print(f"   Expected: {space}")
+            print(f"   Got Type: {type(val)}")
+            print(f"   Got Val : {val}")
+
+            # Common check for shape/dtype issues
+            if isinstance(val, (np.ndarray, np.generic)):
+                print(
+                    f"   Got Shape: {val.shape if hasattr(val, 'shape') else 'Scalar'}"
+                )
+                print(f"   Got Dtype: {val.dtype}")
+        else:
+            print(f"✅ OK: {key}")
+
+
 def test_environment():
-    env = BalatroEnv()
+    env = gym.make("Balatro-v0")
+
     try:
         obs, info = env.reset()
+        _output_key_diff(env, obs)
+        check_env(env.unwrapped)
     except Exception as e:
-        save_data(file_name="test_fail_output", client=env.client)
         raise e
     finally:
+        save_data(file_name="test_fail_output", client=env.client)
         env.client.disconnect()
 
     # print(obs)
@@ -689,5 +692,5 @@ def test_environment():
 
 if __name__ == "__main__":
     # save_data()
-
+    register_env()
     test_environment()
