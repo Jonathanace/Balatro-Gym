@@ -29,7 +29,7 @@ def _create_numbered_enum(class_name, action_keys):
     members = [(key.upper(), i) for i, key in enumerate(action_keys)]
     return Enum(class_name, members)
 
-MAX_HELD_HAND_SIZE = 20
+MAX_HELD_HAND_SIZE = 8
 MAX_SHOP_JOKERS = 4
 UNBOUNDED_MAX = 100
 MAX_PLAY_HAND_SIZE = 5

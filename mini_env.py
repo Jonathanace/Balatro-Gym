@@ -117,18 +117,28 @@ class BalatroEnv(gym.Env):
         target_card_indices = [
             i for i, selected in enumerate(action["target_cards"]) if selected
         ]
+        reward_modifier = 0
         if len(target_card_indices) > 5:
             logging.error(f"{len(target_card_indices)} cards selected to {action_arg}!")
             reward_modifier = -1
         else:
             logging.info(f"Action: {action_arg} cards at indices {target_card_indices}")
-            self.client.send_message(
-                "play_hand_or_discard",
-                {
-                    "action": action_arg,
-                    "cards": target_card_indices,
-                }
-            )
+            try:
+                self.client.send_message(
+                    "play_hand_or_discard",
+                    {
+                        "action": action_arg,
+                        "cards": target_card_indices,
+                    },
+                )
+            except balatrobot.exceptions.InvalidCardIndexError:
+                logging.error(f"Invalid card indices {target_card_indices} selected!")
+                reward_modifier = -0.5
+            except balatrobot.exceptions.InvalidActionError:
+                logging.error(
+                    f"Invalid action attempted: {action_arg} with cards {target_card_indices}!"
+                )
+                reward_modifier = -0.5
 
         observation = self._get_obs()
         state_id = observation["state"]
@@ -150,7 +160,7 @@ def register_mini_env():
     gym.register(
         id="Balatro-Blind-Mini-v0",
         entry_point="mini_env:BalatroEnv",
-        max_episode_steps=10,
+        max_episode_steps=1_000,
     )
 if __name__ == "__main__":
     env = gym.make("Balatro-Blind-Mini-v0")
