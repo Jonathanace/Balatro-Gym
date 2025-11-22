@@ -8,6 +8,36 @@ from matplotlib import pyplot as plt
 from mini_env import register_mini_env
 
 
+class HashableObservationWrapper(gym.ObservationWrapper):
+    def observation(self, obs):
+        hand_tuple = tuple(tuple(card) for card in obs["hand"])
+        state_val = obs["state"]
+        return (hand_tuple, state_val)
+
+
+class DiscreteActionWrapper(gym.ActionWrapper):
+    def __init__(self, env, max_cards=8):
+        super().__init__(env)
+        self.max_cards = max_cards
+
+        self.action_space = gym.spaces.Discrete(max_cards * 2)
+
+    def action(self, action_int):
+        target_mask = [0] * self.max_cards
+
+        if action_int < self.max_cards:
+            play_val = 0  # Play
+            card_idx = action_int
+        else:
+            play_val = 1  # Discard
+            card_idx = action_int - self.max_cards
+
+        if card_idx < self.max_cards:
+            target_mask[card_idx] = 1
+
+        return {"play_or_discard": play_val, "target_cards": target_mask}
+
+
 class BalatroQLearningAgent:
     def __init__(
         self,
@@ -64,6 +94,8 @@ def _train_q_learning_agent(env):
     final_epsilon = 0.1
 
     env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=n_episodes)
+    env = HashableObservationWrapper(env)
+    env = DiscreteActionWrapper(env)
 
     agent = BalatroQLearningAgent(
         env=env,

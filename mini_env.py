@@ -117,11 +117,11 @@ class BalatroEnv(gym.Env):
         target_card_indices = [
             i for i, selected in enumerate(action["target_cards"]) if selected
         ]
-        if len(target_card_indices) >= 5:
+        if len(target_card_indices) > 5:
             logging.error(f"{len(target_card_indices)} cards selected to {action_arg}!")
             reward_modifier = -1
         else:
-
+            logging.info(f"Action: {action_arg} cards at indices {target_card_indices}")
             self.client.send_message(
                 "play_hand_or_discard",
                 {
