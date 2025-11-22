@@ -98,7 +98,6 @@ class BalatroEnv(gym.Env):
             }
         )
 
-
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
         self._start_game()
@@ -111,7 +110,6 @@ class BalatroEnv(gym.Env):
 
     def get_info(self):
         return {}
-
 
     def step(self, action):
         action_arg = "play" if action["play_or_discard"] == 0 else "discard"
@@ -146,14 +144,18 @@ class BalatroEnv(gym.Env):
             reward = 0
             terminated = False
 
-
         return observation, reward + reward_modifier, terminated, False, {}
 
-
+def register_mini_env():
+    gym.register(
+        id="Balatro-Blind-Mini-v0",
+        entry_point="mini_env:BalatroEnv",
+        max_episode_steps=10,
+    )
 if __name__ == "__main__":
-    # save_data()
-    # sys.exit(0)
-    env = BalatroEnv()
+    env = gym.make("Balatro-Blind-Mini-v0")
     obs, info = env.reset()
     _output_key_diff(env, obs)
     check_env(env)
+    # save_data()
+    # sys.exit(0)

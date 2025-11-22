@@ -5,6 +5,7 @@ from main import BalatroEnv
 import gymnasium as gym
 from tqdm import tqdm
 from matplotlib import pyplot as plt
+from mini_env import register_mini_env
 
 
 class BalatroQLearningAgent:
@@ -54,7 +55,7 @@ class BalatroQLearningAgent:
         self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
 
 
-def _train_q_learning_agent():
+def _train_q_learning_agent(env):
     # WARNING: This does not work.
     learning_rate = 0.01
     n_episodes = 100
@@ -62,7 +63,6 @@ def _train_q_learning_agent():
     epsilon_decay = start_epsilon / (n_episodes / 2)
     final_epsilon = 0.1
 
-    env = gym.make("Balatro-v0")
     env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=n_episodes)
 
     agent = BalatroQLearningAgent(
@@ -155,4 +155,6 @@ def _manual_test():
 
 
 if __name__ == "__main__":
-    _train_q_learning_agent()
+    register_mini_env()
+    env = gym.make("Balatro-Blind-Mini-v0")
+    _train_q_learning_agent(env)
