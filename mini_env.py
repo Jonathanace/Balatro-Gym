@@ -112,14 +112,35 @@ class BalatroEnv(gym.Env):
         return {}
 
     def step(self, action):
-        action_arg = "play" if action["play_or_discard"] == 0 else "discard"
+        full_obs = self.client.send_message("get_game_state", {})
+        observation = self._get_obs()
+        state_id = observation["state"]
+        game_state = balatrobot.enums.State(state_id).name
+        action_arg = "play_hand" if action["play_or_discard"] == 0 else "discard"
+
+        if game_state == "GAME_OVER":
+            reward = 0
+            terminated = True
+        elif game_state == "ROUND_EVAL":
+            # won the blind
+            reward = 2
+            terminated = True
+        else:
+            reward = -2
+            terminated = False
+        
+        if terminated:
+            return observation, reward, terminated, False, {}
 
         target_card_indices = [
             i for i, selected in enumerate(action["target_cards"]) if selected
         ]
         reward_modifier = 0
-        if len(target_card_indices) > 5:
+        if len(target_card_indices) > 5 or len(target_card_indices) == 0:
             logging.error(f"{len(target_card_indices)} cards selected to {action_arg}!")
+            reward_modifier = -1
+        elif action_arg == "discard" and full_obs["game"]["current_round"]["discards_left"] == 0:
+            logging.error("No discards left this round!")
             reward_modifier = -1
         else:
             logging.info(f"Action: {action_arg} cards at indices {target_card_indices}")
@@ -140,19 +161,8 @@ class BalatroEnv(gym.Env):
                 )
                 reward_modifier = -0.5
 
-        observation = self._get_obs()
-        state_id = observation["state"]
-        game_state = balatrobot.enums.State(state_id).name
-        if game_state == "GAME_OVER":
-            reward = 0
-            terminated = True
-        elif game_state == "BLIND_SELECT":
-            # won the blind
-            reward = 1
-            terminated = True
-        else:
-            reward = 0
-            terminated = False
+
+
 
         return observation, reward + reward_modifier, terminated, False, {}
 
