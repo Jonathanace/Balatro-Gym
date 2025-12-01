@@ -27,5 +27,5 @@ Coming soon
 - [ ] Add basic features to observation space such as `hands_left`. 
 - [ ] Refactor network architecture to include multi-head output for shop decisions.
 - [ ] Improve README Evaluation, Installation, Usage, and Requirements sections.
-- [ ] 
+
 The project has an associated feature board that you can view [here](https://github.com/users/Jonathanace/projects/3). 
