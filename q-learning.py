@@ -5,6 +5,37 @@ from main import BalatroEnv
 import gymnasium as gym
 from tqdm import tqdm
 from matplotlib import pyplot as plt
+from mini_env import register_mini_env
+
+
+class HashableObservationWrapper(gym.ObservationWrapper):
+    def observation(self, obs):
+        hand_tuple = tuple(tuple(card) for card in obs["hand"])
+        state_val = obs["state"]
+        return (hand_tuple, state_val)
+
+
+class DiscreteActionWrapper(gym.ActionWrapper):
+    def __init__(self, env, max_cards=8):
+        super().__init__(env)
+        self.max_cards = max_cards
+
+        self.action_space = gym.spaces.Discrete(max_cards * 2)
+
+    def action(self, action_int):
+        target_mask = [0] * self.max_cards
+
+        if action_int < self.max_cards:
+            play_val = 0  # Play
+            card_idx = action_int
+        else:
+            play_val = 1  # Discard
+            card_idx = action_int - self.max_cards
+
+        if card_idx < self.max_cards:
+            target_mask[card_idx] = 1
+
+        return {"play_or_discard": play_val, "target_cards": target_mask}
 
 
 class BalatroQLearningAgent:
@@ -54,7 +85,7 @@ class BalatroQLearningAgent:
         self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
 
 
-def _train_q_learning_agent():
+def _train_q_learning_agent(env):
     # WARNING: This does not work.
     learning_rate = 0.01
     n_episodes = 100
@@ -62,8 +93,9 @@ def _train_q_learning_agent():
     epsilon_decay = start_epsilon / (n_episodes / 2)
     final_epsilon = 0.1
 
-    env = gym.make("Balatro-v0")
     env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=n_episodes)
+    env = HashableObservationWrapper(env)
+    env = DiscreteActionWrapper(env)
 
     agent = BalatroQLearningAgent(
         env=env,
@@ -155,4 +187,6 @@ def _manual_test():
 
 
 if __name__ == "__main__":
-    _train_q_learning_agent()
+    register_mini_env()
+    env = gym.make("Balatro-Blind-Mini-v0")
+    _train_q_learning_agent(env)
